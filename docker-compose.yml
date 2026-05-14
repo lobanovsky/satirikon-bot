@@ -1,0 +1,18 @@
+services:
+  satirikon-bot:
+    image: lobanovsky/satirikon-bot:${TAG}
+    container_name: satirikon-bot
+    restart: always
+    environment:
+      TZ: Europe/Moscow
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BACKEND_URL: ${BACKEND_URL}
+      SATIRIKON_API_KEY: ${SATIRIKON_API_KEY}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      WEBHOOK_PORT: ${WEBHOOK_PORT:-8087}
+    ports:
+      - "${WEBHOOK_PORT:-8087}:${WEBHOOK_PORT:-808}"
+    volumes:
+      - ./logs:/app/logs
+    env_file:
+      - .env
