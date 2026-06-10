@@ -1,3 +1,4 @@
+import com.github.kotlintelegrambot.Bot
 import com.github.kotlintelegrambot.dispatcher.Dispatcher
 import com.github.kotlintelegrambot.dispatcher.callbackQuery
 import com.github.kotlintelegrambot.dispatcher.command
@@ -31,29 +32,31 @@ private fun buildPerformancePage(performances: List<PerformanceDto>, page: Int):
     return InlineKeyboardMarkup.create(buttons)
 }
 
+private fun sendPerformances(bot: Bot, userId: Long, chatId: ChatId) {
+    val performances = try {
+        runBlocking { ApiClient.getPerformances(userId) }
+    } catch (e: Exception) {
+        logger().error("Ошибка в /perfs при вызове API: ${e.message}", e)
+        bot.sendMessage(chatId, "⚠️ Ошибка при загрузке спектаклей: ${e.message}", replyMarkup = menuKeyboard())
+        return
+    }
+
+    if (performances.isEmpty()) {
+        bot.sendMessage(chatId, "ℹ На данный момент нет доступных спектаклей.", replyMarkup = menuKeyboard())
+        return
+    }
+
+    bot.sendMessage(
+        chatId = chatId,
+        text = "📜 Выберите спектакли для подписки на уведомления:",
+        replyMarkup = buildPerformancePage(performances, 1)
+    )
+}
+
 fun Dispatcher.perfCommands() {
     command("perfs") {
         val userId = message.from?.id ?: return@command
-        val chatId = ChatId.fromId(message.chat.id)
-
-        val performances = try {
-            runBlocking { ApiClient.getPerformances(userId) }
-        } catch (e: Exception) {
-            logger().error("Ошибка в /perfs при вызове API: ${e.message}", e)
-            bot.sendMessage(chatId, "⚠️ Ошибка при загрузке спектаклей: ${e.message}", replyMarkup = menuKeyboard())
-            return@command
-        }
-
-        if (performances.isEmpty()) {
-            bot.sendMessage(chatId, "ℹ На данный момент нет доступных спектаклей.", replyMarkup = menuKeyboard())
-            return@command
-        }
-
-        bot.sendMessage(
-            chatId = chatId,
-            text = "📜 Выберите спектакли для подписки на уведомления:",
-            replyMarkup = buildPerformancePage(performances, 1)
-        )
+        sendPerformances(bot, userId, ChatId.fromId(message.chat.id))
     }
 }
 
@@ -112,23 +115,27 @@ fun Dispatcher.callbackCommands() {
     }
 }
 
+private fun sendMySubs(bot: Bot, userId: Long, chatId: ChatId) {
+    val subscriptions = runBlocking { ApiClient.getUserSubscriptions(userId) }
+
+    if (subscriptions.isEmpty()) {
+        bot.sendMessage(
+            chatId,
+            "ℹ Вы не подписаны ни на один спектакль.\nИспользуйте /perfs чтобы выбрать спектакли.",
+            replyMarkup = menuKeyboard()
+        )
+    } else {
+        val list = subscriptions.joinToString("\n") {
+            "🎭 <a href=\"${it.performance.url}\">${it.performance.title}</a>"
+        }
+        bot.sendMessage(chatId, "✅ Ваши подписки:\n$list", parseMode = HTML, replyMarkup = menuKeyboard())
+    }
+}
+
 fun Dispatcher.statusCommands() {
     command("mysubs") {
         val userId = message.from?.id ?: return@command
-        val subscriptions = runBlocking { ApiClient.getUserSubscriptions(userId) }
-
-        if (subscriptions.isEmpty()) {
-            bot.sendMessage(
-                ChatId.fromId(message.chat.id),
-                "ℹ Вы не подписаны ни на один спектакль.\nИспользуйте /perfs чтобы выбрать спектакли.",
-                replyMarkup = menuKeyboard()
-            )
-        } else {
-            val list = subscriptions.joinToString("\n") {
-                "🎭 <a href=\"${it.performance.url}\">${it.performance.title}</a>"
-            }
-            bot.sendMessage(ChatId.fromId(message.chat.id), "✅ Ваши подписки:\n$list", parseMode = HTML, replyMarkup = menuKeyboard())
-        }
+        sendMySubs(bot, userId, ChatId.fromId(message.chat.id))
     }
 }
 
@@ -158,6 +165,7 @@ private const val PAYMENT_TEXT = """Стоимость: 1000₽ за 6 меся�
 
 private fun menuKeyboard() = KeyboardReplyMarkup(
     keyboard = listOf(
+        listOf(KeyboardButton("📜 Список спектаклей"), KeyboardButton("🔗 Мои подписки")),
         listOf(KeyboardButton("📋 Моя подписка")),
         listOf(KeyboardButton("ℹ️ Информация"), KeyboardButton("💳 Оплата"))
     ),
@@ -184,6 +192,16 @@ fun Dispatcher.startCommands() {
 }
 
 fun Dispatcher.menuCommands() {
+    text("📜 Список спектаклей") {
+        val userId = message.from?.id ?: return@text
+        sendPerformances(bot, userId, ChatId.fromId(message.chat.id))
+    }
+
+    text("🔗 Мои подписки") {
+        val userId = message.from?.id ?: return@text
+        sendMySubs(bot, userId, ChatId.fromId(message.chat.id))
+    }
+
     text("📋 Моя подписка") {
         val userId = message.from?.id ?: return@text
         val chatId = ChatId.fromId(message.chat.id)
